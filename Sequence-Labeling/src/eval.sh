@@ -1,0 +1,1 @@
+CUDA_VISIBLE_DEVICES='1' /home/weidu/.env/bin/python ./eval.py --CFG ../cfgs/oie_pipeline.cfg
