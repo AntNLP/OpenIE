@@ -1,5 +1,6 @@
 # Sequence Labeling
-
+## 模型结构
+![模型结构](/img/model_structure_sequence_labeling.png)
 ## 训练
 ```
 cd src
@@ -44,3 +45,24 @@ raiders     O       O       A2-I
 .           O       O       O
 ```
 第一列为文本，第二列句子中蕴含的所有relation，第三列之后每一列都对应一个extraction的序列标注。
+
+#### 开发集
+使用的是CaRB的开发集，其格式如下：
+```
+32.7 % of all households were made up of individuals and 15.7 % had someone living alone who was 65 years of age or older .	were made up of	32.7 % of all households	individuals
+```
+是 sentence \t realtion \t argument1 \t argument2 \t argument3.... 的形式
+#### 测试集
+使用的是CaRB的测试集，其格式同上
+
+### result
+
+|   模型结构 | 训练集    | 测试集 | P | R | F1|
+|   ----    | ----      | ---- | ---- | ---- | ----|
+|   joint   | oie2016   | CaRB | 0.449 | 0.319 | 0.373|
+|   joint   | oie2016   | CaRB | 0.449 | 0.319 | 0.373|
+|joint_gold|oie2016|CaRB|0.439|0.345|0.386|
+|joint_soft|oie2016|CaRB|0.479|0.343|0.400|
+|pipeline|oie2016|CaRB|0.486|0.339|0.399|
+|pipeline_gold|oie2016|CaRB|0.460|0.315|0.374|
+|pipeline_soft|oie2016|CaRB|0.424|0.294|0.347|	
