@@ -1,6 +1,6 @@
 # Sequence Labeling
 ## 模型结构
-![模型结构](/img/model_structure_sequence_labeling.png)
+![模型结构](img/model_structure_sequence_labeling.png)
 ## 训练
 ```
 cd src
