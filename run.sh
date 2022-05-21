@@ -1,0 +1,1 @@
+CUDA_VISIBLE_DEVICES='0' /home/weidu/.env/bin/python ./test.py --CFG ./configs/debug.cfg
