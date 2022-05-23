@@ -1,11 +1,11 @@
 import torch.nn as nn
 import torch
-from transformers import BertModel
+from transformers import BertModel, EncoderDecoderConfig
 class Encoder(nn.Module):
-    def __init__(self,  frozen, encoder_model, seg_num, hidden_dim):
+    def __init__(self,  frozen, encoder, seg_num, hidden_dim):
         super(Encoder, self).__init__()
         self.frozen = frozen
-        self.encoder = BertModel.from_pretrained(encoder_model)
+        self.encoder = BertModel.from_pretrained(encoder)
         self.encoder.output_hidden_states=True
 
         self.norm = nn.LayerNorm(hidden_dim);
@@ -13,8 +13,10 @@ class Encoder(nn.Module):
         # if(frozen == True):
         #     self.encoder.eval()
         # self.fc = nn.Linear(hidden_dim, self.tagset_size)
+
     def hook(self, module, input, output):
         self.features = output.last_hidden_state.clone()
+
     def forward(self, x, seg):  # dont confuse this with _forward_alg above.
         encoded_layer = None
         # if(self.frozen):
@@ -29,3 +31,5 @@ class Encoder(nn.Module):
         embeds = encoded_layer[0]
         embeds = self.norm(embeds + self.emb(seg))
         return embeds
+    def reset_parameter(self):
+        pass
