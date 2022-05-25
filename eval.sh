@@ -1,0 +1,1 @@
+CUDA_VISIBLE_DEVICES='3' python ./eval/eval.py --CFG ./configs/debug.cfg

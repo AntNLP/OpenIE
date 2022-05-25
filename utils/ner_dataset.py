@@ -1,4 +1,3 @@
-import os
 import numpy as np
 import logging
 import torch
@@ -6,23 +5,9 @@ from torch.utils.data import Dataset
 from transformers import BertTokenizer
 from utils import vocabs
 
-
 logger = logging.getLogger(__name__)
 
-# bert_model = 'bert-base-cased'
-# tokenizer = BertTokenizer.from_pretrained(bert_model)
-# # VOCAB = ('<PAD>', 'O', 'I-LOC', 'B-PER', 'I-PER', 'I-ORG', 'B-LOC', 'B-ORG')
-# VOCAB = ('<PAD>', '[CLS]', '[SEP]', 'O', 'BO', 'IO', 'BS', 'IS', 'BR', 'IR')
-# # VOCAB = ('<PAD>', '[CLS]', '[SEP]', 'O', 'B-INF', 'I-INF', 'B-PAT', 'I-PAT', 'B-OPS', 
-# #         'I-OPS', 'B-DSE', 'I-DSE', 'B-DRG', 'I-DRG', 'B-LAB', 'I-LAB')
-# VOCAB = (   '<PAD>',    '[CLS]',    '[SEP]',    'O',    'A0-B', 
-#             'A1-B',     'A2-B',     'A3-B',     'A4-B', 'A5-B',
-#             'A0-I',     'A1-I',     'A2-I',     'A3-I', 'A4-I', 
-#             'A5-I',     'P-B',      'P-I')
-# tag2idx = {tag: idx for idx, tag in enumerate(VOCAB)}
-# idx2tag = {idx: tag for idx, tag in enumerate(VOCAB)}
 MAX_LEN = 256 - 2
-
 
 class NerDataset(Dataset):
     def __init__(self, f_path, cfg, gold_tag, seg_tag, task = 'OIE'):

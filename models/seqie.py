@@ -1,68 +1,43 @@
-from base64 import encode
-# from ctypes.wintypes import tagSIZE
-from re import S
-from attr import frozen
-import torch
-import torch.nn as nn
-from torch.nn.modules.sparse import Embedding
-from torchsummary import summary
-import modules.bilstm as bilstm
-# from module.crf import CRF
-
-from torchcrf import CRF
-from sched import scheduler
-from transformers import get_linear_schedule_with_warmup
-import torch.optim as optim
-import torch.nn as nn
-import torch
-from utils.ner_dataset import NerDataset, pad
-from torch.utils import data
-from utils import vocabs
-import numpy as np
-import argparse
-import os
-from utils.oie_eval.carb import Benchmark
-from utils.oie_eval.oie_readers.goldReader import GoldReader
-from utils.oie_eval.matcher import Matcher
 import logging
+
+import torch
+import torch.nn as nn
+from utils import vocabs
+from eval.oie_eval.oie_readers.goldReader import GoldReader
 from modules.encoder import Encoder
 from modules.decoder import Decoder
-logging.basicConfig(level = logging.INFO)
 
+logging.basicConfig(level = logging.INFO)
 class Pipeline(nn.Module):
     def __init__(self, tag2idx, idx2tag, cfg, device):
         super(Pipeline, self).__init__()
         self.device = device
-        if(cfg.ENC_MODEL == 'bert'):
-            self.encmodel = 'bert-base-cased'
         self.hidden_dim = cfg.D_MODEL
         self.seg_num = cfg.SEG_NUM
         self.tag2idx = tag2idx
         self.tagset_size = len(idx2tag)
-        self.encoder = Encoder(frozen = False, encoder = self.encmodel, seg_num = self.seg_num, hidden_dim = self.hidden_dim)
-        self.decoder = Decoder(self.hidden_dim, self.tagset_size, cfg)
+        self.cfg = cfg
+        self.encoder = Encoder( frozen = False,
+                                seg_num = self.seg_num,
+                                hidden_dim = self.hidden_dim,
+                                tagset_size = self.tagset_size,
+                                cfg = self.cfg)
+        self.decoder = Decoder( hidden_dim=self.hidden_dim,
+                                tagset_size = self.tagset_size,
+                                cfg = self.cfg)
         
-        
-        self.features_in_hook = []
-        self.features_out_hook = []
-        self.features = []
-        
-
-
     def init_hidden(self):
         return (torch.randn(2, 1, self.hidden_dim // 2),
                 torch.randn(2, 1, self.hidden_dim // 2))
 
-
-
     def neg_log_likelihood(self, sentence, tags, seg):
-        embeds = self.encoder(sentence, seg)  # [8, 75, 768]
-        loss = self.decoder.loss(embeds, tags = tags)
+        feats = self.encoder(sentence, seg)
+        loss = self.decoder.loss(feats, tags = tags)
         return loss
 
-    def forward(self, sentence, seg):  # dont confuse this with _forward_alg above.
-        embeds = self.encoder(sentence, seg)
-        score, tag_seq = self.decoder(embeds)
+    def forward(self, sentence, seg):  
+        feats = self.encoder(sentence, seg)
+        score, tag_seq = self.decoder(feats)
         return score, torch.tensor(tag_seq, dtype=torch.long)
 
 class Joint(nn.Module):
@@ -75,11 +50,6 @@ class Joint(nn.Module):
         self.tag2idx = tag2idx
         self.idx2tag = idx2tag
         self.tagset_size = len(tag2idx)
-        self.features_in_hook = []
-        self.features_out_hook = []
-        self.features = []
-        if(cfg.ENC_MODEL == 'bert'):
-            self.encmodel = 'bert-base-cased'
         self.arg_model = Pipeline(tag2idx, idx2tag, cfg, device)
         self.pre_model = Pipeline(tag2idx, idx2tag, cfg, device)
 
@@ -88,12 +58,12 @@ class Joint(nn.Module):
         loss_predicate = self.pre_model.neg_log_likelihood(sentence, tags, segg)
         with torch.no_grad():
             _, y_hat = self.pre_model(sentence, segg)
-        #  y_hat.to(self.device)
         y_hat = y_hat.numpy().tolist()
         siz = 0
         sent_list = torch.ones(len(sentence[0])).unsqueeze(0).to(self.device)
         extag_list = torch.ones(len(sentence[0])).unsqueeze(0).to(self.device)
         seg_list = torch.ones(len(sentence[0])).unsqueeze(0).to(self.device)
+
         if(self.opt == 'gold'):
             for y_h, ext, sent, se, in zip(y_hat, extraction, sentence, segg):
                 for i in range(len(ext)):
@@ -105,6 +75,7 @@ class Joint(nn.Module):
                     extag_list = torch.cat((extag_list, torch.tensor(extag).unsqueeze(0).to(self.device)), dim = 0).to(self.device)
                     siz += 1
         elif(self.opt == 'soft'):
+            # sent_list, sent_list, sent_list = soft_extraction()
             for y_h, ext, sent, se, in zip(y_hat, extraction, sentence, segg):
                 l = -1
                 r = -1
@@ -206,7 +177,6 @@ class Joint(nn.Module):
                     cnt += 1
                     siz += 1
 
-        # sent_list = sent_list.reshape(siz, -1)
         sent_list = sent_list[1:].long()
         seg_list = seg_list[1:].long()
         extag_list = extag_list[1:].long()
@@ -220,22 +190,20 @@ class Joint(nn.Module):
         siz = 0
         each_siz = []
         sent_list = torch.ones(len(sentence[0])).unsqueeze(0).to(self.device)
-        extag_list = torch.ones(len(sentence[0])).unsqueeze(0).to(self.device)
         seg_list = torch.ones(len(sentence[0])).unsqueeze(0).to(self.device)
-        for y_h,  sent in zip(y_hat, sentence):
+        for y_h, sent in zip(y_hat, sentence):
             l = -1
             r = -1
             span = []
             for i in range(len(y_h)):
-                if(self.idx2tag[y_h[i]] == 'P-B'):
-                    if(l != -1):
+                if self.idx2tag[y_h[i]] == 'P-B' :
+                    if l != -1 :
                         span.append([l, r])
-                    l = i
-                    r = i
-                elif(self.idx2tag[y_h[i]] == 'P-I'):
+                    l = r = i
+                elif self.idx2tag[y_h[i]] == 'P-I':
                     r = i
                 else:
-                    if(l != -1):
+                    if l != -1 :
                         span.append([l, r])
                     l = -1
             vis = [False] * len(y_h)
@@ -247,7 +215,7 @@ class Joint(nn.Module):
                     if(vis[j] == True):
                         flag = False
                         break
-                if(flag == False):
+                if flag == False:
                     continue
                 for j in range(span[i][0], span[i][1]+1):
                     seg[j] = 1
@@ -256,7 +224,6 @@ class Joint(nn.Module):
                 cnt += 1
                 siz += 1
             each_siz.append(cnt)
-            #print(seg_li)
         if(siz == 0) :
             Y.append([]*len(y_hat))
         else:

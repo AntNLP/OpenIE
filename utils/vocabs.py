@@ -1,3 +1,6 @@
+from os import pread
+
+
 def get_vocab(task):
     vocab = None
     if (task == 'oie2016'):
