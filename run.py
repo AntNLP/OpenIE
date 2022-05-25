@@ -205,6 +205,7 @@ def test(_model, cfg, _iter, test_type):
         output.close()
     if cnt == 0:
         auc,precision, recall, f1 =  0, 0, 0, 0
+        print("AUC:{:.5f}, P:{:.5f}, R:{:.5f}, F1:{:.5f}".format(auc,precision, recall, f1))
     else:
         auc, precision, recall, f1 = eval(cfg, test_type)
     return auc, precision, recall, f1
@@ -221,7 +222,7 @@ def train(cfg, _iter, device, optimizer, scheduler, model):
         _y = y # for monitoring
         optimizer.zero_grad()
         if cfg.METHOD == 'joint':
-            loss = model.neg_log_likelihood(x, y, seg, p_tags, ext) # logits: (N, T, VOCAB), y: (N, T)
+            loss = model.neg_log_likelihood(x, y, seg, ext) # logits: (N, T, VOCAB), y: (N, T)
         elif cfg.METHOD == 'pipeline':
             loss = model.neg_log_likelihood(x, y, seg) # logits: (N, T, VOCAB), y: (N, T)
         loss.backward()

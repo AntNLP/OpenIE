@@ -1,3 +1,4 @@
 # check points files
 /ckpts
 *.pyc
+*.pt
