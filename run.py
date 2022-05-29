@@ -9,23 +9,22 @@ import torch
 from torch.utils import data
 
 from utils.antu.io.configurators import IniConfigurator
-from utils.ner_dataset import NerDataset, pad
-from utils import vocabs
+from utils.dataset import NerDataset, pad
 from eval.evaluation import eval
 from models.seqie import SeqIE
+from utils.tagset import TagSet
 
 logging.basicConfig(level = logging.INFO)
-
-def get_predicate_span(pre_tags_list, gold_tags_list, pfla):
+def get_predicate_span(pre_tags_list, gold_tags_list, pfla, tagset):
     """Function for obtaining the predicating span."""
     def tag2span(tags_list):
         spans = []
         for tags in tags_list:
             l = r = -1
             for idx, tag in enumerate(tags):
-                if tag == 'P-B' :
+                if tag == tagset.predicate_tag_B :
                     l = r = idx
-                elif tag == 'P-I' :
+                elif tag == tagset.predicate_tag_I :
                     r = idx
                 elif l != -1 and [l,r] not in spans:
                     spans.append([l, r])
@@ -50,7 +49,7 @@ def get_predicate_span(pre_tags_list, gold_tags_list, pfla):
         spans = [sp for sp in pre_span_list]
     return spans
 
-def get_predicate_tags(spans, tags_size, limit):
+def get_predicate_tags(spans, tags_size, limit, tagset):
     pre_tags_list = []
     cnt = 0
     for (l, r) in spans:
@@ -58,9 +57,9 @@ def get_predicate_tags(spans, tags_size, limit):
         pre_tags = []
         for idx in range(tags_size):
             if l == idx:
-                pre_tags.append('P-B')
+                pre_tags.append(tagset.predicate_tag_B)
             elif l<idx<=r :
-                pre_tags.append('P-I')
+                pre_tags.append(tagset.predicate_tag_I)
             else:
                 pre_tags.append('O')
         pre_tags_list.append(pre_tags)
@@ -70,12 +69,13 @@ def get_predicate_tags(spans, tags_size, limit):
         pre_tags_list.append(['O']*tags_size)
     return pre_tags_list
 
-def create_train_tmp_data(_model, fname, iterator, tag2idx, idx2tag, device, cfg):
+def create_train_tmp_data(_model, fname, iterator, tagset, device, cfg):
     """Function for create tmp train data in pipeline method."""
     model = _model
     model = model.eval()
     model.to(device)
     fw = open(fname,'w')
+    idx2tag = tagset.get_idx2tag()
     for i, batch in enumerate(iterator):
         words_list, x, is_heads_list, tags, y, seqlens, seg, exts_list, p_tags, att_mask = batch
         x = x.to(device)
@@ -93,20 +93,21 @@ def create_train_tmp_data(_model, fname, iterator, tag2idx, idx2tag, device, cfg
                 ext_tags = [e for head, e in zip(is_heads, ext) if head == 1]
                 ext_tags_list.append(ext_tags)
             assert(len(preds) == len(words))
-            spans = get_predicate_span([preds], ext_tags_list, cfg.PREDICATE_FOR_LEARNING_ARGUMENT)
-            pre_tags_list = get_predicate_tags(spans, len(preds), len(exts))
+            spans = get_predicate_span([preds], ext_tags_list, cfg.PREDICATE_FOR_LEARNING_ARGUMENT, tagset)
+            pre_tags_list = get_predicate_tags(spans, len(preds), len(exts), tagset)
             for ext_tags, pre_tags in zip(ext_tags_list, pre_tags_list):
                 for w, p, s in zip(words[1:-1], ext_tags[1:-1], pre_tags[1:-1]):
                     fw.write(w + '\t' + p + '\t' + s  + '\n')
                 fw.write('\n')
     fw.close()
 
-def create_test_tmp_data(_model, fname, iterator, tag2idx, idx2tag, device, cfg):
+def create_test_tmp_data(_model, fname, iterator, tagset, device, cfg):
     """Function for create tmp test data in pipeline method."""
     model = _model
     model = model.eval()
     model.to(device)
     fw = open(fname,'w')
+    idx2tag = tagset.get_idx2tag()
     for i, batch in enumerate(iterator):
         words_list, x, is_heads_list, tags, y, seqlens, seg, exts_list, p_tags, att_mask = batch
         x = x.to(device)
@@ -125,8 +126,8 @@ def create_test_tmp_data(_model, fname, iterator, tag2idx, idx2tag, device, cfg)
                 ext_tags = [e for head, e in zip(is_heads, ext) if head == 1]
                 ext_tags_list.append(ext_tags)
             assert(len(preds) == len(words))
-            spans = get_predicate_span([preds], ext_tags_list, None)
-            pre_tags_list = get_predicate_tags(spans, len(preds), min(cfg.PREDICATE_LIMIT, len(spans)))
+            spans = get_predicate_span([preds], ext_tags_list, None, tagset)
+            pre_tags_list = get_predicate_tags(spans, len(preds), min(cfg.PREDICATE_LIMIT, len(spans)), tagset)
             for pre_tags in pre_tags_list:
                 for w, s in zip(words[1:-1],  pre_tags[1:-1]):
                     fw.write(w + '\t' + 'O' + '\t' + s  + '\n')
@@ -167,9 +168,9 @@ def test(_model, cfg, _iter, test_type):
     elif test_type == 'test':
         outfile_path = cfg.TEST_OUTPUT
     print("Starting Loading Data...")
-    vocab = vocabs.get_vocab(cfg.DOMAIN)
-    tag2idx = dict(zip(vocab, range(len(vocab))))
-    idx2tag = dict(zip(range(len(vocab)), vocab))
+    tagset = TagSet(cfg)
+    tag2idx = tagset.get_tag2idx()
+    idx2tag = tagset.get_idx2tag()
     print("Loading Data Ended")
     Words, Is_heads, Tags, Y, Y_hat = [], [], [], [], []
     with torch.no_grad():
@@ -287,9 +288,6 @@ def train_joint(_model, cfg): # model -> output
     """Function for joint model training."""
     print("Starting Loading Data...")
     device = 'cuda' if torch.cuda.is_available() else 'cpu'
-    # vocab = vocabs.get_vocab(cfg.DOMAIN)
-    # tag2idx = dict(zip(vocab, range(len(vocab))))
-    # idx2tag = dict(zip(range(len(vocab)), vocab))
     train_dataset = NerDataset(cfg.TRAIN, cfg, cfg.TRAIN_GOLD_TAG, cfg.TRAIN_SEG_TAG)
     train_iter  = data.DataLoader(dataset=train_dataset,
                                         batch_size=cfg.N_BATCH,
@@ -348,10 +346,8 @@ def train_joint(_model, cfg): # model -> output
 def train_pipeline(_model_pre, _model_arg, cfg): # model1 -> output1 -> model2 -> output2
     """Function for training pipeline model."""
     device = 'cuda' if torch.cuda.is_available() else 'cpu'
-    vocab = vocabs.get_vocab(cfg.DOMAIN)
+    tagset = TagSet(cfg)
     epochs = cfg.N_EPOCH
-    tag2idx = dict(zip(vocab, range(len(vocab))))
-    idx2tag = dict(zip(range(len(vocab)), vocab))
     print("Starting Loading Data...")
     train_dataset = NerDataset(cfg.TRAIN, cfg, cfg.TRAIN_GOLD_TAG, cfg.TRAIN_SEG_TAG)
     train_iter  = data.DataLoader(dataset=train_dataset,
@@ -395,8 +391,8 @@ def train_pipeline(_model_pre, _model_arg, cfg): # model1 -> output1 -> model2 -
     optimizer = optim.Adam(model_pre.parameters(), lr = float(cfg.LR))
     optimizer.load_state_dict(ckpt['optim_pre'])
     print('Start create_tmp_data...')
-    create_train_tmp_data(model_pre, cfg.TRAIN_TMP, train_iter, tag2idx, idx2tag, device, cfg)
-    create_test_tmp_data(model_pre, cfg.DEV_TMP, test_iter,  tag2idx, idx2tag, device, cfg)
+    create_train_tmp_data(model_pre, cfg.TRAIN_TMP, train_iter, tagset, device, cfg)
+    create_test_tmp_data(model_pre, cfg.DEV_TMP, test_iter,  tagset, device, cfg)
     print('create_tmp_data Ended')
 
     print("Loading tmp Data Starting...")
@@ -446,7 +442,7 @@ def train_pipeline(_model_pre, _model_arg, cfg): # model1 -> output1 -> model2 -
                                         num_workers=4,
                                         collate_fn=pad
                                         )
-    create_test_tmp_data(model_pre, cfg.TEST_TMP, test_iter,  tag2idx, idx2tag, device, cfg)
+    create_test_tmp_data(model_pre, cfg.TEST_TMP, test_iter,  tagset, device, cfg)
     test_dataset = NerDataset(cfg.TEST_TMP, cfg, False, True)
     test_iter  = data.DataLoader(dataset=test_dataset,
                                     batch_size=cfg.N_BATCH,

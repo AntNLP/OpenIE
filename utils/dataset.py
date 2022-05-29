@@ -3,7 +3,7 @@ import logging
 import torch
 from torch.utils.data import Dataset
 from transformers import BertTokenizer
-from utils import vocabs
+from utils.tagset import TagSet
 
 logger = logging.getLogger(__name__)
 
@@ -11,11 +11,11 @@ MAX_LEN = 256 - 2
 
 class NerDataset(Dataset):
     def __init__(self, f_path, cfg, gold_tag, seg_tag, task = 'OIE'):
-        vocab = vocabs.get_vocab(cfg.DOMAIN)
-        tag2idx = dict(zip(vocab, range(len(vocab))))
-        idx2tag = dict(zip(range(len(vocab)), vocab))
+        tagset = TagSet(cfg)
+        tag2idx = tagset.get_tag2idx()
+        idx2tag = tagset.get_idx2tag()
         self.tokenizer = BertTokenizer.from_pretrained(cfg.TOKENIZER)
-        self.vocab = vocab
+        self.vocab = tagset.get_vocab()
         self.tag2idx = tag2idx
         self.idx2tag = idx2tag
         self.gold_tag = gold_tag

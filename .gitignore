@@ -2,4 +2,4 @@
 /ckpts
 *.pyc
 *.pt
-test.py
+/test.*

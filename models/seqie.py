@@ -1,7 +1,8 @@
 import logging
+from tty import CFLAG
 import torch
 import torch.nn as nn
-from utils import vocabs
+from utils.tagset import TagSet
 from eval.oie_eval.oie_readers.goldReader import GoldReader
 from modules.encoder import Encoder
 from modules.decoder import Decoder
@@ -46,8 +47,9 @@ class Joint(nn.Module):
         self.opt = cfg.PREDICATE_FOR_LEARNING_ARGUMENT
         self.hidden_dim = cfg.D_MODEL
         self.seg_num = cfg.SEG_NUM
-        self.tag2idx = tag2idx
-        self.idx2tag = idx2tag
+        self.tagset = TagSet(cfg)
+        self.tag2idx = self.tagset.get_tag2idx()
+        self.idx2tag = self.tagset.get_idx2tag()
         self.tagset_size = len(tag2idx)
         self.cfg = cfg
         self.arg_model = Pipeline(tag2idx, idx2tag, cfg, device)
@@ -59,11 +61,11 @@ class Joint(nn.Module):
         for tags in tags_list:
             span = []
             for idx, tag in enumerate(tags):
-                if tag == 'P-B':
+                if self.tagset.is_predicate_tag_B(tag):
                     if len(span) != 0:
                         spans.append(span)
                     span = [idx]
-                elif tag == 'P-I':
+                elif self.tagset.is_predicate_tag_I(tag):
                     span.append(idx)
             if len(span) != 0:
                 spans.append(span)
@@ -85,7 +87,7 @@ class Joint(nn.Module):
             if self.cfg.PREDICATE_FOR_LEARNING_ARGUMENT == 'gold':
                 for ext_tags in ext_tags_list:
                     extag = [self.tag2idx[ex] for ex in ext_tags]
-                    seg_tags = [1 if ex == 'P-I' or ex == 'P-B'  else 0 for ex in ext_tags]
+                    seg_tags = [1 if self.tagset.is_predicate_tag(ex) else 0 for ex in ext_tags]
                     sents_tensor = torch.cat((sents_tensor, torch.tensor(sent).unsqueeze(0).to(self.device)), dim = 0).to(self.device)
                     seg_tags_tensor = torch.cat((seg_tags_tensor, torch.tensor(seg_tags).unsqueeze(0).to(self.device)), dim = 0).to(self.device)
                     ext_tags_tensor = torch.cat((ext_tags_tensor, torch.tensor(extag).unsqueeze(0).to(self.device)), dim = 0).to(self.device)
@@ -100,8 +102,7 @@ class Joint(nn.Module):
                         for idx in pre_span:
                             if idx in gold_span:
                                 flag = True
-                                seg_tags = [1 if ex=='P-I' or ex=='P-B' else 0 for ex in ext_tags]
-                                print(seg_tags)
+                                seg_tags = [1 if self.tagset.is_predicate_tag(ex) else 0 for ex in ext_tags]
                                 extag = [self.tag2idx[ex] for ex in ext_tags]
                                 sents_tensor = torch.cat((sents_tensor, torch.tensor(sent).unsqueeze(0).to(self.device)), dim = 0).to(self.device)
                                 seg_tags_tensor = torch.cat((seg_tags_tensor, torch.tensor(seg_tags).unsqueeze(0).to(self.device)), dim = 0).to(self.device)
@@ -172,11 +173,9 @@ class SeqIE():
     """a SeqIE model"""
     def __init__(self, cfg, device):
         """init a SeqIE model"""
-        self.vocab = vocabs.get_vocab(cfg.DOMAIN)
-        tag2idx = dict(zip(self.vocab, range(len(self.vocab))))
-        idx2tag = dict(zip(range(len(self.vocab)), self.vocab))
-        self.tag2idx = tag2idx
-        self.idx2tag = idx2tag
+        self.tagset = TagSet(cfg)
+        self.tag2idx = self.tagset.get_tag2idx()
+        self.idx2tag = self.tagset.get_idx2tag()
         self.device = device
         self.cfg = cfg
     def get_model(self):

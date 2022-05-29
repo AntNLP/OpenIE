@@ -1,6 +1,7 @@
 import torch.nn as nn
 from transformers import BertModel
 from .bilstm import BiLSTM
+from .bert import Bert
 class Encoder(nn.Module):
     def __init__(self,  frozen, seg_num, hidden_dim, tagset_size, cfg):
         super(Encoder, self).__init__()
@@ -17,19 +18,8 @@ class Encoder(nn.Module):
         #     self.encoder.eval()
         # self.fc = nn.Linear(hidden_dim, self.tagset_size)
 
-    def hook(self, module, input, output):
-        self.features = output.last_hidden_state.clone()
-
     def forward(self, x, seg):  # dont confuse this with _forward_alg above.
         encoded_layer = None
-        # if(self.frozen):
-        #     with torch.no_grad():
-        #     # handle = self.bert.bert.register_forward_hook(self.hook)
-        #     # encoded_layer = self.bert(x)
-        #     # enc = self.features
-        #     # handle.remove()
-        #         encoded_layer = self.encoder(x)
-        # else:
         encoded_layer = self.bert(x)
         embeds = encoded_layer[0]
         embeds = self.norm(embeds + self.emb(seg))

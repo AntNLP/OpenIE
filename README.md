@@ -1,25 +1,26 @@
 # Sequence Labeling
 ## 模型结构
-![模型结构](img/model_structure_sequence_labeling.png)
+![模型结构](doc/img/structure_of_seqie.png)
 ## 训练
 ```
 cd src
-./run_pipeline or ./run_joint
+./run.sh
 ```
 
 ## 测试
 
 ```
 cd src
-./eval
+./eval.sh
 ```
 
 ## cfg文件
 
-cfg文件位于cfgs文件夹中，用于设置不同的训练任务和超参数设置，在调用eval.sh和run_x.sh时使用不同的cfg文件即可运行不同的任务。
+cfg文件位于cfgs文件夹中，用于设置不同的训练任务和超参数设置，在调用eval.sh和run.sh时使用不同的cfg文件即可运行不同的任务。
 
 ## 数据集
 数据集都位于data文件夹下。
+
 #### 训练集
 训练集使用的是oie2016，其格式如下：
 ```
