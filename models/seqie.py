@@ -75,62 +75,77 @@ class Joint(nn.Module):
         loss_predicate = self.pre_model.neg_log_likelihood(sents, _tags_list, _segs_list)
         with torch.no_grad():
             _, y_hats_list = self.pre_model(sents, _segs_list)
-        y_hats_list = y_hats_list.numpy().tolist()
+        # y_hats_list = y_hats_list.numpy().tolist()
         siz = 0
-        sents_tensor = torch.ones(len(sents[0])).unsqueeze(0).to(self.device)
-        ext_tags_tensor = torch.ones(len(sents[0])).unsqueeze(0).to(self.device)
-        seg_tags_tensor = torch.ones(len(sents[0])).unsqueeze(0).to(self.device)
-        for y_hats, ext_tags_list, sent, in zip(y_hats_list, _ext_tags_list, sents):
-            preds = [self.idx2tag[y_hat] for y_hat in y_hats]
-            pre_spans = self.get_predicate_span([preds])
-            gold_spans = self.get_predicate_span(ext_tags_list)
-            if self.cfg.PREDICATE_FOR_LEARNING_ARGUMENT == 'gold':
-                for ext_tags in ext_tags_list:
-                    extag = [self.tag2idx[ex] for ex in ext_tags]
-                    seg_tags = [1 if self.tagset.is_predicate_tag(ex) else 0 for ex in ext_tags]
-                    sents_tensor = torch.cat((sents_tensor, torch.tensor(sent).unsqueeze(0).to(self.device)), dim = 0).to(self.device)
-                    seg_tags_tensor = torch.cat((seg_tags_tensor, torch.tensor(seg_tags).unsqueeze(0).to(self.device)), dim = 0).to(self.device)
-                    ext_tags_tensor = torch.cat((ext_tags_tensor, torch.tensor(extag).unsqueeze(0).to(self.device)), dim = 0).to(self.device)
-                    siz += 1
-            elif self.cfg.PREDICATE_FOR_LEARNING_ARGUMENT == 'soft':
-                mx = len(gold_spans)
-                for gold_span, ext_tags in zip(gold_spans, ext_tags_list):
-                    flag = False
-                    for pre_span in pre_spans:
-                        if flag:
-                            break
-                        for idx in pre_span:
-                            if idx in gold_span:
-                                flag = True
-                                seg_tags = [1 if self.tagset.is_predicate_tag(ex) else 0 for ex in ext_tags]
-                                extag = [self.tag2idx[ex] for ex in ext_tags]
-                                sents_tensor = torch.cat((sents_tensor, torch.tensor(sent).unsqueeze(0).to(self.device)), dim = 0).to(self.device)
-                                seg_tags_tensor = torch.cat((seg_tags_tensor, torch.tensor(seg_tags).unsqueeze(0).to(self.device)), dim = 0).to(self.device)
-                                ext_tags_tensor = torch.cat((ext_tags_tensor, torch.tensor(extag).unsqueeze(0).to(self.device)), dim = 0).to(self.device)
+        if self.cfg.PREDICATE_FOR_LEARNING_ARGUMENT == 'gold':
+            for ext, sent in zip(_ext_tags_list, sents):
+                ext_tags_tensor = torch.cat((ext_tags_tensor, torch.tensor(ext).to(device='cuda:0')),dim = 0)
+                sents_tensor = torch.cat((sents_tensor, torch.repeat_interleave(sent.unsqueeze(0), repeats=len(ext), dim=0)), dim=0)
+            
+            sents_tensor = sents_tensor[1:].long()
+            ext_tags_tensor = ext_tags_tensor[1:].long()
+            seg_tags_tensor = torch.where(ext_tags_tensor >=self.tag2idx['P-B'], 1, 0)
+        else:
+            sents_tensor = torch.ones(len(sents[0])).unsqueeze(0).to(self.device)
+            ext_tags_tensor = torch.ones(len(sents[0])).unsqueeze(0).to(self.device)
+            seg_tags_tensor = torch.ones(len(sents[0])).unsqueeze(0).to(self.device)
+            for y_hats, ext_tags_list, sent, in zip(y_hats_list, _ext_tags_list, sents):
+                preds = [y_hat for y_hat in y_hats]
+                pre_spans = self.get_predicate_span([preds])
+                gold_spans = self.get_predicate_span(ext_tags_list)
+                if self.cfg.PREDICATE_FOR_LEARNING_ARGUMENT == 'soft':
+                    mx = len(gold_spans)
+                    for gold_span, ext_tags in zip(gold_spans, ext_tags_list):
+                        flag = False
+                        for pre_span in pre_spans:
+                            if flag:
                                 break
-                    if not flag:
-                        seg_tags = [0 for ex in ext_tags]
-                        extag = [self.tag2idx[ex] for ex in ext_tags]
+                            for idx in pre_span:
+                                if idx in gold_span:
+                                    flag = True
+                                    seg_tags = [1 if self.tagset.is_predicate_tag(ex) else 0 for ex in ext_tags]
+                                    extag = [ex for ex in ext_tags]
+                                    sents_tensor = torch.cat((sents_tensor, torch.tensor(sent).unsqueeze(0).to(self.device)), dim = 0).to(self.device)
+                                    seg_tags_tensor = torch.cat((seg_tags_tensor, torch.tensor(seg_tags).unsqueeze(0).to(self.device)), dim = 0).to(self.device)
+                                    ext_tags_tensor = torch.cat((ext_tags_tensor, torch.tensor(extag).unsqueeze(0).to(self.device)), dim = 0).to(self.device)
+                                    break
+                        if not flag:
+                            seg_tags = [0 for ex in ext_tags]
+                            extag = [ex for ex in ext_tags]
+                            sents_tensor = torch.cat((sents_tensor, torch.tensor(sent).unsqueeze(0).to(self.device)), dim = 0).to(self.device)
+                            seg_tags_tensor = torch.cat((seg_tags_tensor, torch.tensor(seg_tags).unsqueeze(0).to(self.device)), dim = 0).to(self.device)
+                            ext_tags_tensor = torch.cat((ext_tags_tensor, torch.tensor(extag).unsqueeze(0).to(self.device)), dim = 0).to(self.device)
+                elif self.cfg.PREDICATE_FOR_LEARNING_ARGUMENT == 'np':
+                    mx = self.cfg.PREDICATE_LIMIT
+                    cnt = 0
+                    while len(pre_spans) <= len(ext_tags_list):
+                        pre_spans.append([-1])
+                    for pre_span, ext_tags, _segs in zip(pre_spans, ext_tags_list, _segs_list):
+                        extag = [ex for ex in ext_tags]
+                        seg_tags = [1 if i in pre_span else se for i, se in enumerate(_segs)]
                         sents_tensor = torch.cat((sents_tensor, torch.tensor(sent).unsqueeze(0).to(self.device)), dim = 0).to(self.device)
                         seg_tags_tensor = torch.cat((seg_tags_tensor, torch.tensor(seg_tags).unsqueeze(0).to(self.device)), dim = 0).to(self.device)
                         ext_tags_tensor = torch.cat((ext_tags_tensor, torch.tensor(extag).unsqueeze(0).to(self.device)), dim = 0).to(self.device)
-            else:
-                mx = self.cfg.PREDICATE_LIMIT
-                cnt = 0
-                while len(pre_spans) <= len(ext_tags_list):
-                    pre_spans.append([-1])
-                for pre_span, ext_tags in zip(pre_spans, ext_tags_list):
-                    extag = [self.tag2idx[ex] for ex in ext_tags]
-                    seg_tags = [1 if i in pre_span else 0 for i in range(len(ext_tags))]
-                    sents_tensor = torch.cat((sents_tensor, torch.tensor(sent).unsqueeze(0).to(self.device)), dim = 0).to(self.device)
-                    seg_tags_tensor = torch.cat((seg_tags_tensor, torch.tensor(seg_tags).unsqueeze(0).to(self.device)), dim = 0).to(self.device)
-                    ext_tags_tensor = torch.cat((ext_tags_tensor, torch.tensor(extag).unsqueeze(0).to(self.device)), dim = 0).to(self.device)
-                    cnt += 1
-                    if cnt >= mx:
-                        break
-        sents_tensor = sents_tensor[1:].long()
-        ext_tags_tensor = ext_tags_tensor[1:].long()
-        seg_tags_tensor = seg_tags_tensor[1:].long()
+                        cnt += 1
+                        if cnt >= mx:
+                            break
+                else:
+                    mx = self.cfg.PREDICATE_LIMIT
+                    cnt = 0
+                    while len(pre_spans) <= len(ext_tags_list):
+                        pre_spans.append([-1])
+                    for pre_span, ext_tags in zip(pre_spans, ext_tags_list):
+                        extag = [ex for ex in ext_tags]
+                        seg_tags = [1 if i in pre_span else 0 for i in range(len(ext_tags))]
+                        sents_tensor = torch.cat((sents_tensor, torch.tensor(sent).unsqueeze(0).to(self.device)), dim = 0).to(self.device)
+                        seg_tags_tensor = torch.cat((seg_tags_tensor, torch.tensor(seg_tags).unsqueeze(0).to(self.device)), dim = 0).to(self.device)
+                        ext_tags_tensor = torch.cat((ext_tags_tensor, torch.tensor(extag).unsqueeze(0).to(self.device)), dim = 0).to(self.device)
+                        cnt += 1
+                        if cnt >= mx:
+                            break
+            sents_tensor = sents_tensor[1:].long()
+            ext_tags_tensor = ext_tags_tensor[1:].long()
+            seg_tags_tensor = seg_tags_tensor[1:].long()
         loss = loss_predicate + self.arg_model.neg_log_likelihood(sents_tensor, ext_tags_tensor, seg_tags_tensor).to(self.device)
         return loss
 

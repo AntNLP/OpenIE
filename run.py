@@ -2,11 +2,13 @@
 import argparse
 import logging
 import os
+import time
 
 from transformers import get_linear_schedule_with_warmup
 import torch.optim as optim
 import torch
 from torch.utils import data
+from tqdm import tqdm
 
 from utils.antu.io.configurators import IniConfigurator
 from utils.dataset import NerDataset, pad
@@ -77,15 +79,15 @@ def create_train_tmp_data(_model, fname, iterator, tagset, device, cfg):
     fw = open(fname,'w')
     idx2tag = tagset.get_idx2tag()
     for i, batch in enumerate(iterator):
-        words_list, x, is_heads_list, tags, y, seqlens, seg, exts_list, p_tags, att_mask = batch
+        words_list, x, is_heads_list, tags, y, seqlens, segs_list, exts_list, p_tags, att_mask = batch
         x = x.to(device)
         y = y.to(device)
-        seg = seg.to(device)
+        segs_list = segs_list.to(device)
         _y = y 
-        _, y_hats_list = model(x, seg)
+        _, y_hats_list = model(x, segs_list)
         x = x.to(device)
-        seg = seg.to(device)
-        for idx, (words, y_hats, is_heads, exts) in enumerate(zip(words_list, y_hats_list, is_heads_list, exts_list)):
+        
+        for idx, (words, y_hats, is_heads, exts, segs) in enumerate(zip(words_list, y_hats_list, is_heads_list, exts_list, segs_list)):
             y_h = [hat for head, hat in zip(is_heads, y_hats.cpu().numpy().tolist()) if head == 1]
             preds = [idx2tag[hat] for hat in y_h]
             ext_tags_list = []
@@ -211,11 +213,14 @@ def test(_model, cfg, _iter, test_type):
         auc, precision, recall, f1 = eval(cfg, test_type)
     return auc, precision, recall, f1
 
-def train(cfg, _iter, device, optimizer, scheduler, model):
+def train(cfg, _iter, test_iter, device, optimizer, scheduler, model):
     """Function for training in single epoch"""
     model.train()
     iter = _iter
-    for i, batch in enumerate(iter):
+    iterator = tqdm(enumerate(iter), desc='steps', total=len(iter))
+    for i, batch in iterator:
+        model.train()
+        st = time.perf_counter()
         words, x, is_heads, tags, y, seqlens, seg, ext, p_tags, att_mask = batch
         x = x.to(device)
         y = y.to(device)
@@ -229,6 +234,8 @@ def train(cfg, _iter, device, optimizer, scheduler, model):
         loss.backward()
         optimizer.step()
         scheduler.step()
+        ed = time.perf_counter()
+        #print(ed-st)
         if i==0:
             print("=====sanity check======")
             print("x:", x.cpu().numpy()[0][:seqlens[0]])
@@ -238,15 +245,18 @@ def train(cfg, _iter, device, optimizer, scheduler, model):
             print("seqlen:", seqlens[0])
             print("seg:", seg.cpu().numpy()[0][:seqlens[0]])
             print("=======================")
-        if i%10==0: # monitoring
+        if i%1000==0: # monitoring
+            model.eval()
             print(f"step: {i}, loss: {loss.item()}")
+            auc, precision, recall, f1 = test(model, cfg, test_iter, 'dev')
+            print(auc, precision, recall, f1)
 
 def model_save(cfg, fw_log, best, res, model_setting):
     """function for saving model information"""
     best_f1, best_epoch = (ele for ele in best)
     auc, precision, recall, f1 = (ele for ele in res)
     model, optimizer, scheduler, epoch = (ele for ele in model_setting)
-    if epoch <= cfg.CKPT_LIMIT:
+    if epoch < cfg.CKPT_LIMIT:
         return best_f1, best_epoch
     torch.save({
             'epoch': epoch,
@@ -307,7 +317,7 @@ def train_joint(_model, cfg): # model -> output
     epochs = cfg.N_EPOCH
     model = _model.to(device)
     optimizer = optim.Adam(model.parameters(), lr = float(cfg.LR))
-    total_steps = len(test_iter)*epochs
+    total_steps = len(train_iter)*epochs
     if not os.path.isdir(cfg.ckpt_dir):
         os.makedirs(cfg.ckpt_dir)
     fw_log = open(cfg.LOG, 'w')
@@ -318,9 +328,10 @@ def train_joint(_model, cfg): # model -> output
     print('Start Train...,')
     best_f1 = -1
     best_epoch = 0
-    for epoch in range(0, cfg.N_EPOCH):
+    for epoch in tqdm(range(1, cfg.N_EPOCH + 1), desc='epochs'):
+    # for epoch in range(0, cfg.N_EPOCH):
         print(f"=========train at epoch={epoch}=========")
-        train(cfg, train_iter, device, optimizer, scheduler, model)
+        train(cfg, train_iter, test_iter, device, optimizer, scheduler, model)
         print(f"=========dev at epoch={epoch}=========")
         auc, precision, recall, f1 = test(model, cfg, test_iter, 'dev')
         res = [auc, precision, recall, f1]
@@ -421,7 +432,7 @@ def train_pipeline(_model_pre, _model_arg, cfg): # model1 -> output1 -> model2 -
                 num_training_steps = total_steps)
     for epoch in range(0, cfg.N_EPOCH):
         print(f"=========train at epoch={epoch}=========")
-        train(cfg, train_iter, device, optimizer, scheduler, model_arg)
+        train(cfg, train_iter, test_iter, device, optimizer, scheduler, model_arg)
         print(f"=========dev at epoch={epoch}=========")
         # save current model
         auc, precision, recall, f1 = test(model_arg, cfg, test_iter, 'dev')

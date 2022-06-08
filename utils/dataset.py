@@ -7,7 +7,7 @@ from utils.tagset import TagSet
 
 logger = logging.getLogger(__name__)
 
-MAX_LEN = 256 - 2
+MAX_LEN = 100 - 2
 
 class NerDataset(Dataset):
     def __init__(self, f_path, cfg, gold_tag, seg_tag, task = 'OIE'):
@@ -96,8 +96,8 @@ class NerDataset(Dataset):
                     seg.extend([1]*(len(tokens)))
                 else:
                     seg.extend([0]*(len(tokens)))
-            elif(self.seg_tag == True):
-                if(st[0] == 'A'):
+            elif self.seg_tag == True :
+                if(st[0] == 'A' or st == 'NP'):
                     seg.extend([2]*(len(tokens)))
                 elif(st[0] == 'P'):
                     seg.extend([1]*(len(tokens)))
@@ -107,14 +107,14 @@ class NerDataset(Dataset):
                 seg.extend([0]*(len(tokens)))
             # seg.extend([0]*(len(tokens)))
             is_head = [1] + [0]*(len(tokens) - 1)
-            #tt = [t] + ['<PAD>'] * (len(tokens) - 1) 
-            tt = [t] * (len(tokens))
+            tt = [t] + ['<PAD>'] * (len(tokens) - 1) 
+            #tt = [t] * (len(tokens))
             yy = [self.tag2idx[each] for each in tt]  
             x.extend(xx)
             is_heads.extend(is_head)
             y.extend(yy)
             for i in range(len(ext_tags)):
-                ext[i].extend([ext_tags[i][j]]*len(tokens))
+                ext[i].extend([self.tag2idx[ext_tags[i][j]]]+[0] * (len(tokens) - 1) )
             j+=1
 
             
@@ -151,7 +151,7 @@ def pad(batch):
     seg = f(6, maxlen)
     for ex in ext:
         for i in range(len(ex)):
-            ex[i] = ex[i] + ['O'] * (maxlen - len(ex[i]))
+            ex[i] = ex[i] + [0] * (maxlen - len(ex[i]))
     f = lambda x, seqlen: [sample[x] + [0] * (seqlen - len(sample[x])) for sample in batch] # 0: <pad>
     
 

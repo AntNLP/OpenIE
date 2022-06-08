@@ -46,7 +46,7 @@ class TagSet():
         return tag in self.predicate_tag
 
     def is_predicate_tag_B(self, tag):
-        return tag == self.predicate_tag_B
+        return tag in [self.predicate_tag_B, self.tag2idx[self.predicate_tag_B]]
         
     def is_predicate_tag_I(self, tag):
         return tag == self.predicate_tag_I

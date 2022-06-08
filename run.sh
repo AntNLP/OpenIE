@@ -1,1 +1,1 @@
-CUDA_VISIBLE_DEVICES='0' python ./run.py --CFG ./configs/debug.cfg
+CUDA_VISIBLE_DEVICES='1' /home/weidu/.env/bin/python ./run.py --CFG ./configs/joint.cfg
