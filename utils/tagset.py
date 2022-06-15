@@ -4,7 +4,7 @@ class TagSet():
         self.predicate_tag_B = None
         self.predicate_tag_I = None
         if cfg.TAG_SET_TYPE == 'oie2016':
-            self.vocab = (  '<PAD>',    '[CLS]',    '[SEP]',    'O',    'A0-B', 
+            self.vocab = (  '[PAD]',    '[CLS]',    '[SEP]',    'O',    'A0-B', 
                             'A1-B',     'A2-B',     'A3-B',     'A4-B', 'A5-B',
                             'A0-I',     'A1-I',     'A2-I',     'A3-I', 'A4-I', 
                             'A5-I',     'P-B',      'P-I')

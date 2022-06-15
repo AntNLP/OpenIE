@@ -9,7 +9,6 @@ sys.path.append(rootPath)
 import torch.nn as nn
 import logging
 import torch
-from utils import vocabs
 from utils.antu.io.configurators import IniConfigurator
 from .oie_eval.oie_readers.goldReader import GoldReader
 from .oie_eval.carb import Benchmark

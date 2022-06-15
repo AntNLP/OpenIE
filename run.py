@@ -18,7 +18,14 @@ from utils.tagset import TagSet
 
 logging.basicConfig(level = logging.INFO)
 def get_predicate_span(pre_tags_list, gold_tags_list, pfla, tagset):
-    """Function for obtaining the predicating span."""
+    """Function for obtaining the predicating span.
+    
+    Args:
+        pre_tags_list:  A two-dimension list of predicating tags.
+        gold_tags_list: A two-dimension list of ground truth tags.
+        pfla:           The mode for learning predicating arguments.
+        tagset:         A Tagset class.
+    """
     def tag2span(tags_list):
         spans = []
         for tags in tags_list:
@@ -79,12 +86,13 @@ def create_train_tmp_data(_model, fname, iterator, tagset, device, cfg):
     fw = open(fname,'w')
     idx2tag = tagset.get_idx2tag()
     for i, batch in enumerate(iterator):
-        words_list, x, is_heads_list, tags, y, seqlens, segs_list, exts_list, p_tags, att_mask = batch
+        words_list, x, is_heads_list, tags, y, seqlens, segs_list, exts_list, p_tags, att_masks = batch
         x = x.to(device)
         y = y.to(device)
         segs_list = segs_list.to(device)
+        att_masks = att_masks.to(device)
         _y = y 
-        _, y_hats_list = model(x, segs_list)
+        _, y_hats_list = model(x, segs_list, att_masks)
         x = x.to(device)
         
         for idx, (words, y_hats, is_heads, exts, segs) in enumerate(zip(words_list, y_hats_list, is_heads_list, exts_list, segs_list)):
@@ -92,7 +100,7 @@ def create_train_tmp_data(_model, fname, iterator, tagset, device, cfg):
             preds = [idx2tag[hat] for hat in y_h]
             ext_tags_list = []
             for ext in exts:
-                ext_tags = [e for head, e in zip(is_heads, ext) if head == 1]
+                ext_tags = [idx2tag[e] for head, e in zip(is_heads, ext) if head == 1]
                 ext_tags_list.append(ext_tags)
             assert(len(preds) == len(words))
             spans = get_predicate_span([preds], ext_tags_list, cfg.PREDICATE_FOR_LEARNING_ARGUMENT, tagset)
@@ -111,12 +119,13 @@ def create_test_tmp_data(_model, fname, iterator, tagset, device, cfg):
     fw = open(fname,'w')
     idx2tag = tagset.get_idx2tag()
     for i, batch in enumerate(iterator):
-        words_list, x, is_heads_list, tags, y, seqlens, seg, exts_list, p_tags, att_mask = batch
+        words_list, x, is_heads_list, tags, y, seqlens, seg, exts_list, p_tags, att_masks = batch
         x = x.to(device)
         y = y.to(device)
         seg = seg.to(device)
+        att_masks = att_masks.to(device)
         _y = y 
-        _, y_hats_list = model(x, seg)
+        _, y_hats_list = model(x, seg, att_masks)
         x = x.to(device)
         seg = seg.to(device)
         for idx, (words, y_hats, is_heads, exts) in enumerate(zip(words_list, y_hats_list, is_heads_list, exts_list)):
@@ -125,7 +134,7 @@ def create_test_tmp_data(_model, fname, iterator, tagset, device, cfg):
             assert(len(preds) == len(words))
             ext_tags_list = []
             for ext in exts:
-                ext_tags = [e for head, e in zip(is_heads, ext) if head == 1]
+                ext_tags = [idx2tag[e] for head, e in zip(is_heads, ext) if head == 1]
                 ext_tags_list.append(ext_tags)
             assert(len(preds) == len(words))
             spans = get_predicate_span([preds], ext_tags_list, None, tagset)
@@ -137,6 +146,15 @@ def create_test_tmp_data(_model, fname, iterator, tagset, device, cfg):
     fw.close()
 
 def write_output(preds, texts, output):
+    """Function for outputting the results into file in form of column file.
+
+    Args:
+        preds:  A list of tags the model predicated ([CLS] and [SEP] are the 
+                first one and the last one respectively).
+        testxs: A list of the words in sentences ([CLS] and [SEP] are the 
+                first one and the last one respectively).
+        output: The output file path.
+    """
     cnt = 0
     tags = preds[1:-1]
     predicates = []
@@ -160,7 +178,20 @@ def write_output(preds, texts, output):
     return cnt
 
 def test(_model, cfg, _iter, test_type):
-    """Function for model developing and testing."""
+    """Function for model developing and testing.
+
+    Args:
+        _model:     A model to be tested.
+        cfg:        A config file for setting model parameters.
+        _iter:      A dataset loader.
+        test_type:  To choose different running mode('dev' or 'test').
+
+    Returns:
+        4 float variates for the test results including accuracy, precision, recall, f1.
+        example:
+
+        0.315 0.609 0.391 0.476
+    """
     model = _model
     device = 'cuda' if torch.cuda.is_available() else 'cpu'
     model.to(device)
@@ -176,14 +207,18 @@ def test(_model, cfg, _iter, test_type):
     print("Loading Data Ended")
     Words, Is_heads, Tags, Y, Y_hat = [], [], [], [], []
     with torch.no_grad():
+        # iterator = tqdm(enumerate(_iter), desc='steps', total=len(_iter))
+        # for i, batch in iterator:
         for i, batch in enumerate(_iter):
-            words, inputs, is_heads, tags, y, seqlens, seg, ext, p_tags, att_mask = batch
+            words, inputs, is_heads, tags, y, seqlens, seg, ext, p_tags, att_masks = batch
             inputs = inputs.to(device)
             seg = seg.to(device)
-            _, y_hat = model(inputs, seg)
+            att_masks = att_masks.to(device)
+            _, y_hat = model(inputs, seg, att_masks)
             Words.extend(words)
             Is_heads.extend(is_heads)
             Tags.extend(tags)
+            
             Y.extend(y.numpy().tolist())
             if(cfg.METHOD == 'joint'):
                 Y_hat.extend(y_hat)
@@ -215,22 +250,30 @@ def test(_model, cfg, _iter, test_type):
 
 def train(cfg, _iter, test_iter, device, optimizer, scheduler, model):
     """Function for training in single epoch"""
+    t_dataset = NerDataset(cfg.TEST, cfg, False, False)
+    t_iter    = data.DataLoader(dataset=t_dataset,
+                                        batch_size=cfg.N_BATCH,
+                                        shuffle=False,
+                                        num_workers=4,
+                                        collate_fn=pad
+                                    )
     model.train()
     iter = _iter
     iterator = tqdm(enumerate(iter), desc='steps', total=len(iter))
     for i, batch in iterator:
         model.train()
         st = time.perf_counter()
-        words, x, is_heads, tags, y, seqlens, seg, ext, p_tags, att_mask = batch
+        words, x, is_heads, tags, y, seqlens, seg, ext, p_tags, att_masks = batch
         x = x.to(device)
         y = y.to(device)
+        att_masks = att_masks.to(device)
         seg = seg.to(device)
         _y = y # for monitoring
         optimizer.zero_grad()
         if cfg.METHOD == 'joint':
-            loss = model.neg_log_likelihood(x, y, seg, ext) # logits: (N, T, VOCAB), y: (N, T)
+            loss = model.neg_log_likelihood(x, y, seg, ext, att_masks) # logits: (N, T, VOCAB), y: (N, T)
         elif cfg.METHOD == 'pipeline':
-            loss = model.neg_log_likelihood(x, y, seg) # logits: (N, T, VOCAB), y: (N, T)
+            loss = model.neg_log_likelihood(x, y, seg, att_masks) # logits: (N, T, VOCAB), y: (N, T)
         loss.backward()
         optimizer.step()
         scheduler.step()
@@ -245,11 +288,15 @@ def train(cfg, _iter, test_iter, device, optimizer, scheduler, model):
             print("seqlen:", seqlens[0])
             print("seg:", seg.cpu().numpy()[0][:seqlens[0]])
             print("=======================")
-        if i%1000==0: # monitoring
+        if i%1000==0 and i != 0: # monitoring
             model.eval()
             print(f"step: {i}, loss: {loss.item()}")
+            print('dev:')
             auc, precision, recall, f1 = test(model, cfg, test_iter, 'dev')
-            print(auc, precision, recall, f1)
+            # print(auc, precision, recall, f1)
+            print('test:')
+            auc, precision, recall, f1 = test(model, cfg, t_iter, 'test')
+            # print(auc, precision, recall, f1)
 
 def model_save(cfg, fw_log, best, res, model_setting):
     """function for saving model information"""
@@ -329,7 +376,6 @@ def train_joint(_model, cfg): # model -> output
     best_f1 = -1
     best_epoch = 0
     for epoch in tqdm(range(1, cfg.N_EPOCH + 1), desc='epochs'):
-    # for epoch in range(0, cfg.N_EPOCH):
         print(f"=========train at epoch={epoch}=========")
         train(cfg, train_iter, test_iter, device, optimizer, scheduler, model)
         print(f"=========dev at epoch={epoch}=========")
@@ -337,8 +383,9 @@ def train_joint(_model, cfg): # model -> output
         res = [auc, precision, recall, f1]
         model_setting = [model, optimizer, scheduler, epoch]
         best_f1, best_epoch = model_save(cfg, fw_log, [best_f1, best_epoch], res, model_setting)
-        # save current model
+    # save current model
     ckpt = torch.load(cfg.BEST)
+    #ckpt = torch.load(cfg.LAST)
     model.load_state_dict(ckpt['model'])
     optimizer = optim.Adam(model.parameters(), lr = float(cfg.LR))
     optimizer.load_state_dict(ckpt['optim'])
@@ -388,7 +435,7 @@ def train_pipeline(_model_pre, _model_arg, cfg): # model1 -> output1 -> model2 -
     fw_log = open(cfg.LOG, 'w')
     if not cfg.CHECK_POINT:
         for epoch in range(0, cfg.N_EPOCH+1):
-            train(cfg, train_iter, device, optimizer, scheduler, model_pre)
+            train(cfg, train_iter, test_iter, device, optimizer, scheduler, model_pre)
             if epoch % 50 == 0:
                 torch.save({
                     'epoch': epoch,
@@ -441,8 +488,8 @@ def train_pipeline(_model_pre, _model_arg, cfg): # model1 -> output1 -> model2 -
         best_f1, best_epoch = model_save(cfg, fw_log, [best_f1, best_epoch], res, model_setting)
     ckpt = torch.load(cfg.BEST)
     model = model_arg
-    optimizer = optim.Adam(model.parameters(), lr = float(cfg.LR))
     model.load_state_dict(ckpt['model'])
+    optimizer = optim.Adam(model.parameters(), lr = float(cfg.LR))
     optimizer.load_state_dict(ckpt['optim'])
     print('Start Test...')
     
@@ -461,7 +508,7 @@ def train_pipeline(_model_pre, _model_arg, cfg): # model1 -> output1 -> model2 -
                                     num_workers=4,
                                     collate_fn=pad
                                     )
-    auc, precision, recall, f1 = auc, precision, recall, f1 = test(model_arg, cfg, test_iter, 'test')
+    auc, precision, recall, f1 = auc, precision, recall, f1 = test(model, cfg, test_iter, 'test')
     print('Test Ended')
     # test for test dataset
     fw_log.close()
@@ -475,6 +522,7 @@ def main():
     device = 'cuda' if torch.cuda.is_available() else 'cpu'
     cfg = IniConfigurator(args.CFG, extra_args)
     seqie = SeqIE(cfg, device)
+    torch.manual_seed(cfg.SEED)
     if cfg.METHOD == 'joint':
         train_joint(seqie.get_model(), cfg)
     elif cfg.METHOD == 'pipeline':

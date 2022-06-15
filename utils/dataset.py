@@ -59,6 +59,7 @@ class NerDataset(Dataset):
         is_heads = []
         seg = []
         ext = [ [] for i in range(len(ext_tags))]
+        att_masks = []
         if(self.task == 'REL'):
             for i in range(len(tags)):
                 if(self.task == 'REL'):
@@ -68,7 +69,7 @@ class NerDataset(Dataset):
         for w, t, st in zip(words, tags, seg_tags):
             tokens = self.tokenizer.tokenize(w) if w not in ("[CLS]", "[SEP]") else [w]
             if(len(tokens) == 0):
-                tokens = ['<PAD>']
+                tokens = ['[PAD]']
             xx = self.tokenizer.convert_tokens_to_ids(tokens)
             assert len(tokens) == len(xx), f"len(tokens)={len(tokens)}, len(xx)={len(xx)}, tokens={tokens}, xx={xx} "
             if(self.task == 'REL'):
@@ -107,11 +108,13 @@ class NerDataset(Dataset):
                 seg.extend([0]*(len(tokens)))
             # seg.extend([0]*(len(tokens)))
             is_head = [1] + [0]*(len(tokens) - 1)
-            tt = [t] + ['<PAD>'] * (len(tokens) - 1) 
+            att_mask = [1] + [0]*(len(tokens) - 1)
+            tt = [t] + ['[PAD]'] * (len(tokens) - 1) 
             #tt = [t] * (len(tokens))
             yy = [self.tag2idx[each] for each in tt]  
             x.extend(xx)
             is_heads.extend(is_head)
+            att_masks.extend([1 if xxx != 0 else 0 for xxx in xx])
             y.extend(yy)
             for i in range(len(ext_tags)):
                 ext[i].extend([self.tag2idx[ext_tags[i][j]]]+[0] * (len(tokens) - 1) )
@@ -125,7 +128,7 @@ class NerDataset(Dataset):
         # to string
         #words = " ".join(words)
         #tags = " ".join(tags)
-        return words, x, is_heads, tags, y, seqlen, seg, p_tags, ext
+        return words, x, is_heads, tags, y, seqlen, seg, p_tags, ext, att_masks
 
 
     def __len__(self):
@@ -141,13 +144,13 @@ def pad(batch):
     seqlens = f(5)
     seg = f(6)
     p_tags = f(7)
-    att_mask = f(8)
-    ext = f(-1)
+    ext = f(8)
     maxlen = np.array(seqlens).max()
 
     f = lambda x, seqlen: [sample[x] + [0] * (seqlen - len(sample[x])) for sample in batch] # 0: <pad>
     x = f(1, maxlen)
     y = f(4, maxlen)
+    att_masks = f(-1, maxlen) 
     seg = f(6, maxlen)
     for ex in ext:
         for i in range(len(ex)):
@@ -160,4 +163,4 @@ def pad(batch):
     f = torch.LongTensor
     # for i in range(len(ext)):
     #     ext[i] = f(ext[i])
-    return words, f(x), is_heads, tags, f(y), seqlens, f(seg), ext, p_tags, att_mask
+    return words, f(x), is_heads, tags, f(y), seqlens, f(seg), ext, p_tags, f(att_masks)

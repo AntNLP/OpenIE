@@ -30,13 +30,13 @@ class Pipeline(nn.Module):
         return (torch.randn(2, 1, self.hidden_dim // 2),
                 torch.randn(2, 1, self.hidden_dim // 2))
 
-    def neg_log_likelihood(self, sentence, tags, seg):
-        feats = self.encoder(sentence, seg)
+    def neg_log_likelihood(self, sentence, tags, seg, att_masks):
+        feats = self.encoder(sentence, seg, att_masks)
         loss = self.decoder.loss(feats, tags = tags)
         return loss
 
-    def forward(self, sentence, seg):  
-        feats = self.encoder(sentence, seg)
+    def forward(self, sentence, seg, att_masks):  
+        feats = self.encoder(sentence, seg, att_masks)
         score, tag_seq = self.decoder(feats)
         return score, torch.tensor(tag_seq, dtype=torch.long)
 
@@ -71,13 +71,15 @@ class Joint(nn.Module):
                 spans.append(span)
         return spans
 
-    def neg_log_likelihood(self, sents, _tags_list, _segs_list, _ext_tags_list, mask = None):
-        loss_predicate = self.pre_model.neg_log_likelihood(sents, _tags_list, _segs_list)
+    def neg_log_likelihood(self, sents, _tags_list, _segs_list, _ext_tags_list, att_masks):
+        loss_predicate = self.pre_model.neg_log_likelihood(sents, _tags_list, _segs_list, att_masks)
         with torch.no_grad():
-            _, y_hats_list = self.pre_model(sents, _segs_list)
+            _, y_hats_list = self.pre_model(sents, _segs_list, att_masks)
         # y_hats_list = y_hats_list.numpy().tolist()
         siz = 0
         if self.cfg.PREDICATE_FOR_LEARNING_ARGUMENT == 'gold':
+            sents_tensor = torch.ones(len(sents[0])).unsqueeze(0).to(self.device)
+            ext_tags_tensor = torch.ones(len(sents[0])).unsqueeze(0).to(self.device)
             for ext, sent in zip(_ext_tags_list, sents):
                 ext_tags_tensor = torch.cat((ext_tags_tensor, torch.tensor(ext).to(device='cuda:0')),dim = 0)
                 sents_tensor = torch.cat((sents_tensor, torch.repeat_interleave(sent.unsqueeze(0), repeats=len(ext), dim=0)), dim=0)
@@ -146,12 +148,17 @@ class Joint(nn.Module):
             sents_tensor = sents_tensor[1:].long()
             ext_tags_tensor = ext_tags_tensor[1:].long()
             seg_tags_tensor = seg_tags_tensor[1:].long()
-        loss = loss_predicate + self.arg_model.neg_log_likelihood(sents_tensor, ext_tags_tensor, seg_tags_tensor).to(self.device)
+        att_masks = torch.where(sents_tensor == 0, 0, 1)
+        loss = loss_predicate + self.arg_model.neg_log_likelihood(
+                                                sents_tensor, 
+                                                ext_tags_tensor, 
+                                                seg_tags_tensor, 
+                                                att_masks).to(self.device)
         return loss
 
-    def forward(self, _sents, _segs_list, mask = None):  
+    def forward(self, _sents, _segs_list, att_masks):  
         with torch.no_grad():
-            _, y_hats_list = self.pre_model(_sents, _segs_list)
+            _, y_hats_list = self.pre_model(_sents, _segs_list, att_masks)
         y_hats_list = y_hats_list.numpy().tolist()
         Y = []
         siz = 0
@@ -173,7 +180,8 @@ class Joint(nn.Module):
         else:
             sents_tensor = sents_tensor[1:].long()
             seg_tags_tensor = seg_tags_tensor[1:].long()
-            _, y =  self.arg_model(sents_tensor, seg_tags_tensor)  # y_hat: (N, T)
+            att_masks = torch.where(sents_tensor == 0, 0, 1)
+            _, y =  self.arg_model(sents_tensor, seg_tags_tensor, att_masks)  # y_hat: (N, T)
             y = y.numpy().tolist()
             tot = 0
             for esiz in each_siz:
